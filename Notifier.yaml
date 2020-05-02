@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  Queue:
+    Type: AWS::SQS::Queue
+
+  SnsTopic:
+    Type: AWS::SNS::Topic
+
+  SnsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SnsTopic
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SnsTopic
+          - Sid: DefaultStatement
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - sns:GetTopicAttributes
+              - sns:SetTopicAttributes
+              - sns:AddPermission
+              - sns:RemovePermission
+              - sns:DeleteTopic
+              - sns:Subscribe
+              - sns:ListSubscriptionsByTopic
+              - sns:Publish
+              - sns:Receive
+            Resource: !Ref SnsTopic
+            Condition:
+              StringEquals:
+                "AWS:SourceOwner": !Ref AWS::AccountId
+
+  Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: NumberOfMessagesSent
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt Queue.QueueName
+      Statistic: Maximum
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0.0
+      Period: 60
+      EvaluationPeriods: 1
+      TreatMissingData: notBreaching
+
+  EventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Targets:
+        - Id: SNS
+          Arn: !Ref SnsTopic
+          Input: !Sub '"Security Hub in account ${AWS::AccountId} has found something. Check out Security Hub console!"'
+      EventPattern:
+        source:
+          - aws.cloudwatch
+        "detail-type":
+          - CloudWatch Alarm State Change
+        detail:
+          alarmName:
+            - !Ref Alarm
+          state:
+            value:
+              - ALARM
+
+Outputs:
+  SqsArn:
+    Value: !GetAtt Queue.Arn
+
+  SqsUrl:
+    Value: !Ref Queue
+
+  SnsTopic:
+    Value: !GetAtt SnsTopic.TopicName
